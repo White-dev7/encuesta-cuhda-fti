@@ -1,0 +1,19 @@
+{
+  "name": "encuesta-cuhda-fti",
+  "version": "1.0.0",
+  "description": "Encuesta CUHDA-FTI v2.2 — UNAB",
+  "directories": {
+    "doc": "docs",
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "playwright test",
+    "test:escritorio": "playwright test --project=escritorio",
+    "reporte": "playwright show-report qa-reporte"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.10.1",
+    "@playwright/test": "^1.49.1"
+  },
+  "private": true
+}
