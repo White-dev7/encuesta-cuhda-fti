@@ -1,0 +1,9 @@
+Imágenes de la universidad (nombres exactos):
+
+  logo.png      Logo de la UNAB (ya incluido).
+  favicon.png   Icono de la pestaña, generado a partir del logo (ya incluido).
+  portada.jpg   Foto de la bienvenida (opcional). Mínimo 1200 px de ancho, menos de 400 KB.
+  cierre.jpg    Foto de la pantalla final (opcional). Horizontal, mínimo 1400 px de ancho, menos de 400 KB.
+
+Si portada.jpg o cierre.jpg no están, la encuesta muestra una ilustración en su lugar.
+Use solo fotos que la universidad autorice publicar y, si aparecen personas, con su permiso.

@@ -1,0 +1,98 @@
+// Pruebas del dashboard y de las funciones estadísticas — CUHDA-FTI v2.2
+const { test, expect } = require('@playwright/test');
+const AxeBuilder = require('@axe-core/playwright').default;
+const E = require('../js/estadistica.js');
+const banco = require('../js/preguntas.js');
+const ejemplo = require('../js/ejemplo.js');
+
+const ENDPOINT = 'https://pruebas.cuhda.local/exec';
+const sinFuentes = page => page.route(/fonts\.(googleapis|gstatic)\.com/, r => r.abort());
+
+test.describe('Estadística (valores verificados a mano)', () => {
+  test('alfa de Cronbach', () => {
+    const r = E.cronbach([[1, 2, 3], [2, 3, 4], [3, 4, 5], [4, 5, 5], [2, 2, 3]]);
+    expect(r.alpha).toBeCloseTo(0.96903, 4);
+    expect(r.n).toBe(5);
+    expect(E.cronbach([[1, 2], [2, ''], [3, 3]]).n).toBe(2); // solo casos completos
+    expect(E.alphaLabel(0.85)).toBe('buena');
+  });
+  test('correlación de Pearson e intervalo', () => {
+    const p = E.pearson([1, 2, 3, 4, 5], [2, 4, 6, 8, 10]);
+    expect(p.r).toBeCloseTo(1, 6); expect(p.pendiente).toBeCloseTo(2, 6);
+    const q = E.pearson([1, 2, 3, 4, 5, 6], [2, 1, 4, 3, 6, 5]);
+    expect(q.r).toBeCloseTo(0.82857, 4); expect(q.lo).toBeLessThan(q.r); expect(q.hi).toBeGreaterThan(q.r);
+  });
+  test('medias, mediana, frecuencias y puntaje con «No aplica»', () => {
+    expect(E.mean([1, 2, '', 3])).toBe(2);
+    expect(E.median([5, 1, 3, 2])).toBe(2.5);
+    expect(E.frecuencias([1, 1, 2, ''], [1, 2, 3]).map(f => f.n)).toEqual([2, 1, 0]);
+    expect(E.puntaje({ D1: 4, D2: 2, D6: 0 }, ['D1', 'D2', 'D6'], { ceroEsPerdido: true })).toBe(3);
+    const ci = E.ciMean([3, 4, 5, 4, 3, 4]); expect(ci.lo).toBeLessThan(ci.mean); expect(ci.hi).toBeGreaterThan(ci.mean);
+  });
+});
+
+test.describe('Dashboard', () => {
+  test('sin conexión muestra datos de ejemplo con todas las secciones', async ({ page }) => {
+    const errores = []; page.on('pageerror', e => errores.push(e.message));
+    await sinFuentes(page);
+    await page.goto('/dashboard.html');
+    await expect(page.locator('.banner')).toContainText('datos de ejemplo');
+    for (const t of ['Las tres dimensiones', 'Presencia docente y aprendizaje', 'Respuestas por ítem', 'Herramientas digitales', 'Perfil de quienes', 'Participación y calidad'])
+      await expect(page.getByRole('heading', { name: new RegExp(t) })).toBeVisible();
+    await expect(page.locator('.lrow')).toHaveCount(17);
+    await expect(page.locator('#scatter circle')).not.toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'Canal de difusión' })).toBeVisible();
+    expect(errores).toEqual([]);
+  });
+
+  test('los filtros cambian la muestra analizada', async ({ page }) => {
+    await sinFuentes(page);
+    await page.goto('/dashboard.html');
+    const n = () => page.evaluate(() => window.CUHDA_DASH.analisis().length);
+    const total = await n();
+    await page.selectOption('#f-tipo', '3');
+    expect(await n()).toBeLessThan(total);
+    expect(await page.evaluate(() => window.CUHDA_DASH.analisis().every(r => +r.S6 === 3))).toBe(true);
+    await page.selectOption('#f-tipo', '');
+    await page.uncheck('#f-validas');
+    expect(await n()).toBeGreaterThan(total);
+  });
+
+  test('con la hoja conectada pide clave, rechaza una incorrecta y carga con la correcta', async ({ page }) => {
+    const filas = ejemplo.generar(banco, 40, 99), cols = Object.keys(filas.find(f => f.completo === 1));
+    await sinFuentes(page);
+    await page.addInitScript(ep => { window.__CUHDA_ENDPOINT_TEST__ = ep; }, ENDPOINT);
+    await page.route(u => u.href.startsWith(ENDPOINT), r => {
+      const clave = new URL(r.request().url()).searchParams.get('clave');
+      const body = clave === 'secreta123' ? { ok: true, columnas: cols, filas: filas.map(f => cols.map(c => f[c] ?? '')), generado: '2026-11-20T22:00:00Z' } : { ok: false, error: 'clave' };
+      return r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+    });
+    await page.goto('/dashboard.html');
+    await page.fill('#clave', 'incorrecta');
+    await page.click('button[type=submit]');
+    await expect(page.locator('.err')).toHaveText('La clave no es correcta.');
+    await page.fill('#clave', 'secreta123');
+    await page.click('button[type=submit]');
+    await expect(page.locator('.kpi').first()).toContainText('40');
+    await expect(page.locator('.banner')).toHaveCount(0);
+    await expect(page.locator('.sub')).toContainText('actualizado');
+  });
+
+  test('sin infracciones WCAG 2.1 AA (axe)', async ({ page }) => {
+    await sinFuentes(page);
+    await page.goto('/dashboard.html');
+    await expect(page.locator('#scatter circle').first()).toBeAttached();
+    const r = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze();
+    expect(r.violations.map(v => `${v.id} — ${v.help} → ${v.nodes.slice(0, 4).map(n => n.target.join(' ')).join(', ')}`)).toEqual([]);
+  });
+
+  for (const ancho of [360, 768, 1280]) {
+    test(`sin desplazamiento horizontal a ${ancho}px`, async ({ page }) => {
+      await page.setViewportSize({ width: ancho, height: 900 });
+      await sinFuentes(page);
+      await page.goto('/dashboard.html');
+      await expect(page.locator('.kpi').first()).toBeVisible();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(ancho);
+    });
+  }
+});
