@@ -33,7 +33,8 @@
       const res = await fetch(`${ENDPOINT}?accion=datos&clave=${encodeURIComponent(clave)}`, { cache: 'no-store' });
       const j = await res.json();
       if (!j.ok) { cargando = false; if (j.error === 'clave') { store.set(KEY_CLAVE, ''); login('La clave no es correcta.'); } else login('El servidor respondió con un error: ' + esc(j.error)); return; }
-      RAW = j.filas.map(f => Object.fromEntries(j.columnas.map((c, i) => [c, f[i]])));
+      // Ignora filas vacías (por ejemplo, filas cuyo contenido se borró en la hoja sin eliminar la fila).
+      RAW = j.filas.map(f => Object.fromEntries(j.columnas.map((c, i) => [c, f[i]]))).filter(r => String(r.id_respuesta ?? '').trim() !== '');
       fuente = 'hoja'; actualizado = j.generado ? new Date(j.generado) : new Date(); store.set(KEY_CLAVE, clave);
     } catch (e) {
       cargando = false; login('No se pudo conectar con la hoja. Revise la URL en js/config.js y su conexión a internet.'); return;
