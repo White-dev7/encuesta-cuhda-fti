@@ -1,6 +1,6 @@
 // Pruebas automáticas de la encuesta CUHDA-FTI v2.2
 // Ejecutar: npm test   (ver README, sección "Control de calidad")
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('./base');
 const AxeBuilder = require('@axe-core/playwright').default;
 const banco = require('../js/preguntas.js');
 
@@ -385,5 +385,102 @@ test.describe('Equipo y Compartir en cualquier momento', () => {
       await expect(page.locator('.top [data-dialogo="equipo"]')).toBeVisible();
       await expect(page.locator('.top [data-dialogo="compartir"]')).toBeVisible();
     }
+  });
+});
+
+test.describe('Protección de la hoja real', () => {
+  test('aunque config.js tenga la URL real de Google, las pruebas no envían nada', async ({ page }) => {
+    await page.route('**/js/config.js', async route => {
+      const r = await route.fetch(); const body = (await r.text()).replace(/endpoint: '[^']*'/, "endpoint: 'https://script.google.com/macros/s/REAL/exec'");
+      return route.fulfill({ response: r, body });
+    });
+    await page.route(/fonts\.(googleapis|gstatic)\.com/, r => r.abort());
+    await page.goto('/');
+    await completar(page);
+    await expect(page.locator('.note')).toContainText('Modo demostración');
+  });
+});
+
+test.describe('Resultados al final de la encuesta', () => {
+  const RESUMEN = ENDPOINT + '?accion=resumen';
+  const ruta = (page, body) => page.route(u => u.href === RESUMEN, r => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) }));
+
+  test('con suficientes respuestas compara al estudiante con el promedio', async ({ page }) => {
+    await ruta(page, { ok: true, n: 42, suficiente: true, minimo: 10, dim: { F: 3.2, D: 3.6, A: 3.9 }, herr: { H3_1: 0.9, H4_1: 0.8, H2_1: 0.7, H1_2: 0.6, H5_1: 0.5, H6_1: 0.4 } });
+    await abrir(page);
+    await completar(page, { likert: 5 });
+    const res = page.locator('#resultados');
+    await expect(res).toContainText('Basado en 42 respuestas válidas');
+    await expect(res.locator('.rdim')).toHaveCount(3);
+    await expect(res.locator('.mk.tu')).toHaveCount(4); // 3 marcas + leyenda
+    await expect(res.locator('.rdim').first()).toContainText('Usted 5.0');
+    await expect(res.locator('.rdim').first()).toContainText('1.8 por encima del promedio');
+    await expect(res.locator('.rbar')).toHaveCount(5);
+    await expect(res.locator('.rbar').first()).toContainText('Aula virtual');
+    await page.waitForFunction(() => document.getAnimations().every(a => a.playState !== 'running' || a.effect?.getComputedTiming().endTime === Infinity));
+    const r = await new AxeBuilder({ page }).include('#resultados').withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze();
+    expect(r.violations.map(v => v.id)).toEqual([]);
+  });
+
+  test('con menos de 10 respuestas no muestra promedios del grupo', async ({ page }) => {
+    await ruta(page, { ok: true, n: 4, suficiente: false, minimo: 10 });
+    await abrir(page);
+    await completar(page);
+    const res = page.locator('#resultados');
+    await expect(res).toContainText('al menos 10 respuestas válidas (van 4)');
+    await expect(res.locator('.mk.pr')).toHaveCount(0);
+    await expect(res.locator('.mk.tu')).toHaveCount(4);
+  });
+
+  test('si el resumen falla, muestra solo los resultados personales', async ({ page }) => {
+    await abrir(page);
+    await completar(page);
+    await expect(page.locator('#resultados')).toContainText('No se pudieron cargar los promedios');
+  });
+
+  test('en modo demostración muestra una vista de ejemplo', async ({ page }) => {
+    await page.route(/fonts\.(googleapis|gstatic)\.com/, r => r.abort());
+    await page.goto('/');
+    await completar(page);
+    await expect(page.locator('#resultados')).toContainText('vista de ejemplo');
+  });
+
+  test('quien no da su consentimiento no ve resultados', async ({ page }) => {
+    await abrir(page);
+    await page.click('#start');
+    await avanzaTras(page, () => page.click('.opt[data-v="0"]'));
+    await expect(page.locator('#resultados')).toHaveCount(0);
+  });
+
+  test('el enlace corto aparece en Compartir cuando se configura', async ({ page }) => {
+    await page.route('**/js/config.js', async route => {
+      const r = await route.fetch(); const body = (await r.text()).replace("urlCorta: ''", "urlCorta: 'bit.ly/encuesta-fti'");
+      return route.fulfill({ response: r, body });
+    });
+    await abrir(page);
+    await page.click('.wl[data-dialogo="compartir"]');
+    await expect(page.locator('.sh-corto')).toContainText('bit.ly/encuesta-fti');
+  });
+});
+
+test.describe('Resumen público de Apps Script', () => {
+  const fs = require('fs'), vm = require('vm');
+  const ctx = {}; vm.createContext(ctx);
+  vm.runInContext(fs.readFileSync(__dirname + '/../apps-script/Codigo.gs', 'utf8') + ';this.resumir=resumir;this.COLUMNAS=COLUMNAS;', ctx);
+  const cols = ctx.COLUMNAS;
+  const fila = (o) => cols.map(c => (c in o ? o[c] : ''));
+  const valida = (i, extra) => fila(Object.assign({ id_respuesta: 'id-' + i + '-abcdefgh', completo: 1, CTRL1_valido: 1, piloto: 0,
+    F1: 4, F2: 4, F3: 4, F4: 4, F5: 4, D1: 3, D2: 3, D3: 3, D4: 3, D5: 3, D6: 0, A1: 5, A2: 5, A3: 5, A4: 5, A5: 5, A6: 5, H1_1: i % 2, H3_1: 1 }, extra || {}));
+  test('no publica promedios con menos de 10 respuestas válidas', () => {
+    const filas = [...Array.from({ length: 9 }, (_, i) => valida(i)), valida(99, { piloto: 1 }), valida(98, { CTRL1_valido: 0 }), fila({})];
+    const r = ctx.resumir(cols, filas);
+    expect(r.suficiente).toBe(false); expect(r.n).toBe(9); expect(r.dim).toBeUndefined();
+  });
+  test('con 10 o más publica solo promedios y porcentajes', () => {
+    const r = ctx.resumir(cols, Array.from({ length: 12 }, (_, i) => valida(i)));
+    expect(r.suficiente).toBe(true); expect(r.n).toBe(12);
+    expect(r.dim).toEqual({ F: 4, D: 3, A: 5 }); // D6 = 0 (No aplica) no cuenta
+    expect(r.herr.H3_1).toBe(1); expect(r.herr.H1_1).toBe(0.5);
+    expect(JSON.stringify(r)).not.toContain('id-');
   });
 });

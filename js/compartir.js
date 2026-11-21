@@ -99,10 +99,11 @@
     for (const t of ['8 minutos', 'Anónima', 'Desde el celular']) { const w = ctx.measureText(t).width + 44; ctx.fillStyle = 'rgba(255,255,255,.12)'; redondeado(ctx, x, y, w, 56, 28); ctx.fill(); ctx.fillStyle = '#fff'; ctx.fillText(t, x + 22, y + 38); x += w + 14; }
     y += 100;
     // QR
-    const Q = Math.min(400, H - 150 - y - 110), qx = (W - Q - 60) / 2;
+    const Q = Math.min(400, H - 150 - y - 110 - (CFG.urlCorta ? 50 : 0)), qx = (W - Q - 60) / 2;
     ctx.fillStyle = '#fff'; redondeado(ctx, qx, y, Q + 60, Q + 110, 32); ctx.fill();
     dibujarQR(ctx, enlace('qr'), qx + 30, y + 30, Q, logo);
     ctx.fillStyle = '#14295a'; ctx.font = `800 32px ${F}`; ctx.textAlign = 'center'; ctx.fillText('Escanea y responde', W / 2, y + Q + 80);
+    if (CFG.urlCorta) { ctx.fillStyle = '#fff'; ctx.font = `700 28px ${F}`; ctx.textAlign = 'center'; ctx.fillText('o entra a ' + String(CFG.urlCorta).replace(/^https?:\/\//, ''), W / 2, y + Q + 160); }
     ctx.textAlign = 'left';
     // pie
     ctx.fillStyle = '#c7d6f5'; ctx.font = `500 24px ${F}`;
@@ -135,6 +136,7 @@
 <div class="sh-main">
 <label class="sh-l" for="sh-url">Enlace de la encuesta</label>
 <div class="sh-url"><input id="sh-url" readonly value="${esc(enlace('enlace'))}"><button type="button" class="dlg-btn pri ic" id="sh-copiar">${I('copy')}<span>Copiar</span></button></div>
+${CFG.urlCorta ? `<p class="sh-corto">${I('link')}<span>Enlace corto para dictar en clase: <b>${esc(String(CFG.urlCorta).replace(/^https?:\/\//, ''))}</b></span></p>` : ''}
 <p class="sh-l">Compartir en</p>
 <div class="redes">${REDES.map(r => `<a class="red r-${r.k}" href="${esc(r.href())}" target="_blank" rel="noopener">${r.icono ? I(r.icono) : M(r.k)}<span>${r.n}</span></a>`).join('')}${nativo}</div>
 <div class="afiche"><div class="af-prev" aria-hidden="true"><span class="af-a"></span><span class="af-b"></span><span class="af-q">${I('qr-code')}</span></div>

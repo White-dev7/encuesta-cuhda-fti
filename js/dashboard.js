@@ -2,7 +2,8 @@
 (function () {
   'use strict';
   const CFG = window.CUHDA_CONFIG || {}, B = window.CUHDA_PREGUNTAS, E = window.CUHDA_ESTADISTICA;
-  const ENDPOINT = String(window.__CUHDA_ENDPOINT_TEST__ || CFG.endpoint || '').trim();
+  // En las pruebas automáticas se fija un endpoint falso (o vacío = demostración) para no tocar la hoja real.
+  const ENDPOINT = String(window.__CUHDA_ENDPOINT_TEST__ !== undefined ? window.__CUHDA_ENDPOINT_TEST__ : (CFG.endpoint || '')).trim();
   const KEY_CLAVE = 'cuhda-dashboard-clave';
   const Q = Object.fromEntries(B.ITEMS.map(q => [q.id, q]));
   const IDS = { F: ['F1', 'F2', 'F3', 'F4', 'F5'], D: ['D1', 'D2', 'D3', 'D4', 'D5', 'D6'], A: ['A1', 'A2', 'A3', 'A4', 'A5', 'A6'] };
@@ -69,7 +70,7 @@
     const logo = `<span class="word">${CFG.imagenes?.logo ? `<span class="hlogo"><img src="${esc(CFG.imagenes.logo)}" alt="" onerror="this.parentNode.remove()"></span>` : ''}<span><b>${esc(INST.universidad)}</b><span>${esc(INST.carrera)} · ${esc(INST.facultad)}</span></span></span>`;
     const I = (window.CUHDA_ICONOS || { icono: () => '' }).icono;
     const eq = `<button class="btn ghost" data-dialogo="equipo" aria-label="Equipo">${I('users')}<span>Equipo</span></button><button class="btn ghost" data-dialogo="compartir" aria-label="Compartir">${I('qr-code')}<span>Compartir</span></button>`;
-    const acciones = !conDatos ? `<div class="acts">${eq}</div>` : `<div class="acts">${eq}<button class="btn light" id="b-act" aria-label="Actualizar"${fuente !== 'hoja' ? ' hidden' : ''}>${I('refresh-cw')}<span>${cargando ? 'Actualizando…' : 'Actualizar'}</span></button><button class="btn light" id="b-csv" aria-label="Exportar CSV">${I('file-spreadsheet')}<span>Exportar CSV</span></button>${fuente === 'hoja' ? `<button class="btn ghost" id="b-salir" aria-label="Salir">${I('log-out')}<span>Salir</span></button>` : ''}</div>`;
+    const acciones = !conDatos ? `<div class="acts">${eq}</div>` : `<div class="acts">${eq}<button class="btn light" id="b-act" aria-label="Actualizar"${fuente !== 'hoja' ? ' hidden' : ''}>${I('refresh-cw')}<span>${cargando ? 'Actualizando…' : 'Actualizar'}</span></button><button class="btn light" id="b-csv" aria-label="Exportar CSV">${I('file-spreadsheet')}<span>Exportar CSV</span></button><button class="btn light" id="b-spss" aria-label="Exportar para SPSS">${I('download')}<span>SPSS</span></button><a class="btn light" id="b-rep" href="reporte.html" aria-label="Reporte ejecutivo">${I('printer')}<span>Reporte</span></a>${fuente === 'hoja' ? `<button class="btn ghost" id="b-salir" aria-label="Salir">${I('log-out')}<span>Salir</span></button>` : ''}</div>`;
     return `<div class="wrap"><div class="hbar">${logo}${acciones}</div>${t || '<h1>Resultados de la encuesta CUHDA-FTI v2.2</h1>'}</div>`;
   }
   function renderHero(a) {
@@ -109,18 +110,18 @@
   }
 
   function dimensiones(a) {
-    return `<section class="sec"><div class="sh"><h2>Las tres dimensiones, en promedio</h2><p>Puntaje medio por persona (1 a 5) con su intervalo de confianza del 95 % y la confiabilidad interna de cada escala (alfa de Cronbach).</p></div>
+    return `<section class="sec"><div class="sh"><h2>Las tres dimensiones, en promedio</h2><p>Puntaje medio por persona (1 a 5) con su intervalo de confianza del 95 % y la confiabilidad interna de cada escala (alfa de Cronbach y omega de McDonald).</p></div>
 <div class="dims">${DIM.map(d => {
       const ci = E.ciMean(a.map(r => score(r, d.k)));
       const filas = (d.k === 'D' ? a.filter(r => +r.D6 > 0) : a).map(r => IDS[d.k].map(id => r[id]));
-      const al = E.cronbach(filas);
+      const al = E.cronbach(filas), om = E.omega(filas);
       const x = v => ((v - 1) / 4 * 100);
       return `<article class="card dim" style="--dc:${d.color}"><h3>${d.nombre}</h3>
 <p class="big">${ci ? n1.format(ci.mean) : '—'}<span> / 5</span></p>
 <div class="scale" role="img" aria-label="Media ${ci ? n1.format(ci.mean) : '—'} en escala de 1 a 5">${ci ? `<i class="ci" style="left:${x(ci.lo)}%;width:${x(ci.hi) - x(ci.lo)}%"></i><i class="pt" style="left:${x(ci.mean)}%"></i>` : ''}</div>
 <div class="ticks"><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span></div>
 <p class="mut small">IC 95 %: ${ci ? `${f2(ci.lo)} a ${f2(ci.hi)}` : '—'} · ${d.escala}</p>
-<p class="alpha"><b>α = ${f2(al.alpha)}</b> · ${E.alphaLabel(al.alpha)} <span class="mut">(${IDS[d.k].length} ítems, n = ${al.n}${d.k === 'D' ? ', sin «No aplica»' : ''})</span></p></article>`;
+<p class="alpha"><b>α = ${f2(al.alpha)}</b> · <b>ω = ${f2(om.omega)}</b> · ${E.alphaLabel(om.omega ?? al.alpha)} <span class="mut">(${IDS[d.k].length} ítems, n = ${al.n}${d.k === 'D' ? ', sin «No aplica»' : ''})</span></p></article>`;
     }).join('')}</div></section>`;
   }
 
@@ -244,20 +245,67 @@ ${bloque('F', 'Frecuencia de integración pedagógica', B.ESCALAS.F)}${bloque('D
     if (a.length >= 5) drawScatter(a);
   }
 
-  function csv() {
-    const a = analisis(); if (!a.length) return;
+  async function guardar(name, txt, tipo) {
+    if (dl) { try { await dl.save({ filename: name, data: txt }); } catch (e) { /* cancelado */ } return; }
+    try { const u = URL.createObjectURL(new Blob([txt], { type: tipo })), l = document.createElement('a'); l.href = u; l.download = name; document.body.append(l); l.click(); l.remove(); setTimeout(() => URL.revokeObjectURL(u), 3000); } catch (e) { /* sin descarga */ }
+  }
+  function textoCSV(a) {
     const cols = Object.keys(a[0]);
     const cell = v => { const s = String(v ?? ''); return /[",\n;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
-    const txt = '﻿' + [cols.join(','), ...a.map(r => cols.map(c => cell(r[c])).join(','))].join('\n');
-    const name = `cuhda-fti-${fuente}-${new Date().toISOString().slice(0, 10)}.csv`;
-    if (dl) { dl.save({ filename: name, data: txt }).catch(() => {}); return; }
-    try { const u = URL.createObjectURL(new Blob([txt], { type: 'text/csv;charset=utf-8' })), l = document.createElement('a'); l.href = u; l.download = name; document.body.append(l); l.click(); l.remove(); setTimeout(() => URL.revokeObjectURL(u), 3000); } catch (e) { /* sin descarga */ }
+    return '\ufeff' + [cols.join(','), ...a.map(r => cols.map(c => cell(r[c])).join(','))].join('\n');
+  }
+  const nombre = ext => `cuhda-fti-${fuente}-${new Date().toISOString().slice(0, 10)}.${ext}`;
+  function csv() { const a = analisis(); if (a.length) guardar(nombre('csv'), textoCSV(a), 'text/csv;charset=utf-8'); }
+
+  /** Sintaxis SPSS con etiquetas de variables y de valores, nivel de medida y valores perdidos. */
+  function spss(cols) {
+    const q = t => "'" + String(t).replace(/'/g, "''").replace(/\s+/g, ' ').slice(0, 250) + "'";
+    const vl = [], val = [], ord = [], nom = [], esc = [], dic = [];
+    const add = (v, et) => { if (cols.includes(v)) vl.push(`  ${v} ${q(et)}`); };
+    add('piloto', 'Respuesta de prueba piloto'); add('duracion_seg', 'Duración en segundos'); add('completo', 'Cuestionario completo');
+    add('canal', 'Canal de difusión'); add('dispositivo', 'Tipo de pantalla');
+    for (const it of B.ITEMS) {
+      if (it.t === 'multi') {
+        it.o.forEach((o, j) => { const v = `${it.id}_${j + 1}`; add(v, `${it.id}. ${it.ind}: ${o}`); dic.push(v); });
+        add(`${it.id}_ninguna`, `${it.id}. ${it.ind}: Ninguna`); dic.push(`${it.id}_ninguna`);
+        add(`${it.id}_n`, `${it.id}. Opciones marcadas`); esc.push(`${it.id}_n`); add(`${it.id}_otra`, `${it.id}. Otra (texto)`);
+      } else if (it.t === 'lik') {
+        add(it.id, `${it.id}. ${it.ind}`); ord.push(it.id);
+        if (cols.includes(it.id)) val.push(`  ${it.id} ${B.ESCALAS[it.s].map((l, i) => `${i + 1} ${q(l)}`).join(' ')}${it.na ? ` 0 ${q('No aplica')}` : ''}`);
+      } else {
+        add(it.id, `${it.id}. ${it.ind}`); (['S1', 'S4', 'S5'].includes(it.id) ? ord : nom).push(it.id);
+        if (cols.includes(it.id)) val.push(`  ${it.id} ${codes(it).map(([l, c]) => `${c} ${q(l)}`).join(' ')}`);
+      }
+    }
+    [['H1_H5_total', 'Variedad tecnológica transversal (0-21)'], ['H6_total', 'Variedad tecnológica especializada (0-6)'], ['F_total', 'Frecuencia de integración pedagógica (5-25)'],
+      ['D_total', 'Presencia docente (D1-D6)'], ['A_total', 'Aprendizaje percibido (6-30)'], ['CTRL1_valido', 'Aprobó control de atención'], ['D6_no_aplica', 'D6 respondido No aplica'],
+      ['flag_rapido', 'Respuesta muy rápida'], ['flag_lineal', 'Misma respuesta en todos los Likert']].forEach(([v, e]) => { add(v, e); });
+    esc.push(...['duracion_seg', 'H1_H5_total', 'H6_total', 'F_total', 'D_total', 'A_total'].filter(v => cols.includes(v)));
+    dic.push(...['piloto', 'completo', 'CTRL1_valido', 'D6_no_aplica', 'flag_rapido', 'flag_lineal'].filter(v => cols.includes(v)));
+    const presentes = l => l.filter(v => cols.includes(v));
+    const hoy = new Date().toISOString().slice(0, 10);
+    return [
+      `* Encuesta ${CFG.version || 'CUHDA-FTI v2.2'} — sintaxis SPSS generada por el dashboard el ${hoy}.`,
+      `* 1) Abra en SPSS el archivo ${nombre('csv')} (Archivo > Importar datos > CSV, primera fila = nombres de variables).`,
+      '* 2) Ejecute esta sintaxis (Ejecutar > Todo).',
+      '', 'VARIABLE LABELS', vl.join('\n/') + '.', '',
+      'VALUE LABELS', val.join('\n/') + '.', '',
+      `VALUE LABELS ${presentes(dic).join(' ')} 1 'Sí' 0 'No'.`, '',
+      cols.includes('D6') ? "MISSING VALUES D6 (0).\n" : '',
+      `VARIABLE LEVEL ${presentes(ord).join(' ')} (ORDINAL)\n  /${presentes(nom).join(' ')} (NOMINAL)\n  /${presentes(esc).join(' ')} (SCALE).`, '',
+      'EXECUTE.', ''
+    ].join('\n');
+  }
+  async function exportarSPSS() {
+    const a = analisis(); if (!a.length) return;
+    await guardar(nombre('csv'), textoCSV(a), 'text/csv;charset=utf-8');
+    await guardar(nombre('sps'), '\ufeff' + spss(Object.keys(a[0])), 'text/plain;charset=utf-8');
   }
 
   /* ---------- eventos ---------- */
   document.addEventListener('change', e => {
     const t = e.target, m = { 'f-carrera': 'carrera', 'f-tipo': 'tipo', 'f-anio': 'anio', 'f-validas': 'validas', 'f-flags': 'flags', 'f-piloto': 'piloto' }[t.id];
-    if (!m) return; F[m] = t.type === 'checkbox' ? t.checked : t.value; render(); document.getElementById(t.id)?.focus();
+    if (!m) return; F[m] = t.type === 'checkbox' ? t.checked : t.value; store.set('cuhda-dashboard-filtros', JSON.stringify(F)); render(); document.getElementById(t.id)?.focus();
   });
   document.addEventListener('submit', e => { if (e.target.id === 'f-login') { e.preventDefault(); const c = $('#clave').value.trim(); if (c) cargar(c); } });
   document.addEventListener('click', e => {
@@ -267,12 +315,14 @@ ${bloque('F', 'Frecuencia de integración pedagógica', B.ESCALAS.F)}${bloque('D
     else if (b.id === 'b-act') { const c = store.get(KEY_CLAVE); if (c) cargar(c); }
     else if (b.id === 'b-salir') { store.set(KEY_CLAVE, ''); RAW = []; login(''); }
     else if (b.id === 'b-csv') csv();
+    else if (b.id === 'b-spss') exportarSPSS();
   });
   setInterval(() => { if (fuente === 'hoja' && !document.hidden && !cargando) { const c = store.get(KEY_CLAVE); if (c) cargar(c); } }, 5 * 60 * 1000);
 
   /* ---------- arranque ---------- */
   try { window.claude?.use?.('downloads')?.then(d => { dl = d; }).catch(() => {}); } catch (e) { /* fuera de Claude */ }
-  window.CUHDA_DASH = { analisis, get RAW() { return RAW; }, F };
+  window.CUHDA_DASH = { analisis, spss, get RAW() { return RAW; }, F };
+  try { Object.assign(F, JSON.parse(store.get('cuhda-dashboard-filtros') || '{}')); } catch (e) { /* filtros por defecto */ }
   if (!ENDPOINT) ejemplo();
   else { const c = store.get(KEY_CLAVE); if (c) cargar(c); else login(''); }
 })();

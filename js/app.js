@@ -3,7 +3,8 @@
   'use strict';
   const CFG = window.CUHDA_CONFIG || {};
   const B = window.CUHDA_PREGUNTAS;
-  const ENDPOINT = String(window.__CUHDA_ENDPOINT_TEST__ || CFG.endpoint || '').trim();
+  // En las pruebas automáticas se fija un endpoint falso (o vacío = demostración) para no tocar la hoja real.
+  const ENDPOINT = String(window.__CUHDA_ENDPOINT_TEST__ !== undefined ? window.__CUHDA_ENDPOINT_TEST__ : (CFG.endpoint || '')).trim();
   const VERSION = CFG.version || 'CUHDA-FTI v2.2';
   const MIN_SEG = +CFG.minSegundos || 120;
   const STORE = 'cuhda-fti-v22-estado', PEND = 'cuhda-fti-v22-pendientes', SCHEMA = 2;
@@ -167,9 +168,56 @@ ${m.oc ? `<div class="otra"><label for="otra" class="sr">Otra, especifique</labe
     const photo = IMG.cierre && !e.reason ? `<img class="cierre" src="${esc(CFG.imagenes.cierre)}" alt="Campus de la Universidad Dr. Andrés Bello">` : '';
     const share = window.CUHDA_COMPARTIR ? `<section class="share-card"><div><h2>${I('megaphone')}Ayúdenos a llegar a más estudiantes</h2><p>Comparta la encuesta con sus compañeros de la FTI. Cada respuesta cuenta.</p></div>
 <div class="share-row"><a class="sbtn wa" href="${esc(window.CUHDA_COMPARTIR.href('whatsapp'))}" target="_blank" rel="noopener">${IC.marca('whatsapp')}WhatsApp</a><button type="button" class="sbtn" data-dialogo="compartir">${I('qr-code')}QR y redes</button><button type="button" class="sbtn" id="copiar-fin">${I('link')}<span>Copiar enlace</span></button></div></section>` : '';
+    const resultados = !e.reason ? `<section class="res" id="resultados" aria-live="polite">${resultadosHTML()}</section>` : '';
     return `<div class="stage end in">${photo}<div class="burst" aria-hidden="true">${I('party-popper')}</div>
-<h1 class="q" id="qt" tabindex="-1">${t[0]}</h1><p class="help">${t[1]}</p>${note}${share}
+<h1 class="q" id="qt" tabindex="-1">${t[0]}</h1><p class="help">${t[1]}</p>${note}${resultados}${share}
 <p class="endlinks"><button type="button" class="link" data-dialogo="equipo">${I('users')}Conozca al equipo de investigación</button><button type="button" class="link" id="again">${I('refresh-cw')}Nueva respuesta en este dispositivo</button></p></div>`;
+  }
+
+  /* ---------- resultados al final (solo agregados) ---------- */
+  let RES = null, resEstado = 'cargando';
+  const DEMO_RES = { ok: true, n: 128, suficiente: true, minimo: 10, dim: { F: 3.42, D: 3.71, A: 3.86 },
+    herr: { H1_2: 0.71, H3_1: 0.93, H4_1: 0.88, H2_1: 0.84, H5_1: 0.8, H2_3: 0.77, H1_1: 0.52, H6_1: 0.58 } };
+  const DIMS = [['F', 'Frecuencia de integración', 'cuánto se usan las herramientas en clase'], ['D', 'Presencia docente', 'cómo le guía su docente con ellas'], ['A', 'Aprendizaje percibido', 'cuánto siente que aprende']];
+  const f1 = v => (v === null || v === undefined || isNaN(v)) ? '—' : (Math.round(v * 10) / 10).toFixed(1);
+  async function cargarResumen() {
+    if (!st.end || st.end.reason) return;
+    if (!ENDPOINT) { RES = DEMO_RES; resEstado = 'demo'; pintarResumen(); return; }
+    resEstado = 'cargando'; pintarResumen();
+    try {
+      const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 15000);
+      const j = await (await fetch(`${ENDPOINT}?accion=resumen`, { cache: 'no-store', signal: ctl.signal })).json(); clearTimeout(t);
+      if (!j || !j.ok) throw new Error('resumen');
+      RES = j; resEstado = 'ok';
+    } catch (err) { resEstado = 'error'; }
+    pintarResumen();
+  }
+  function pintarResumen() { const el = document.getElementById('resultados'); if (el) el.innerHTML = resultadosHTML(); }
+  function herrLabel(k) {
+    const [id, j] = k.split('_'), q = ITEMS.find(i => i.id === id); return q ? q.o[+j - 1] : k;
+  }
+  function resultadosHTML() {
+    const mio = st.end?.mio;
+    const cab = `<h2>${I('chart-column')}Así van los resultados</h2>`;
+    if (resEstado === 'cargando') return `${cab}<p class="res-sub">${I('refresh-cw')}Cargando los resultados del grupo…</p>`;
+    if (resEstado === 'error' && !mio) return '';
+    const hay = (resEstado === 'ok' || resEstado === 'demo') && RES && RES.suficiente;
+    const x = v => ((Math.max(1, Math.min(5, v)) - 1) / 4 * 100).toFixed(1);
+    const filas = DIMS.map(([k, n, d]) => {
+      const p = hay ? RES.dim[k] : null, m = mio ? mio[k] : null;
+      const dif = p !== null && m !== null && !isNaN(m) ? m - p : null;
+      const frase = dif === null ? '' : Math.abs(dif) < 0.15 ? 'Muy similar al promedio' : `${f1(Math.abs(dif))} ${dif > 0 ? 'por encima' : 'por debajo'} del promedio`;
+      return `<div class="rdim"><div class="rtop"><b>${n}</b><span class="rv">${m !== null && !isNaN(m) ? `<span class="tu">Usted ${f1(m)}</span>` : ''}${p !== null ? `<span class="pr">Promedio ${f1(p)}</span>` : ''}</span></div>
+<div class="rtrack" role="img" aria-label="${n}: usted ${f1(m)}${p !== null ? `, promedio ${f1(p)}` : ''} en escala de 1 a 5">${p !== null ? `<i class="mk pr" style="left:${x(p)}%"></i>` : ''}${m !== null && !isNaN(m) ? `<i class="mk tu" style="left:${x(m)}%"></i>` : ''}</div>
+<p class="rnote">${esc(d)}${frase ? ` · <b>${frase}</b>` : ''}</p></div>`;
+    }).join('');
+    const top = hay && RES.herr ? Object.entries(RES.herr).sort((a, b) => b[1] - a[1]).slice(0, 5) : [];
+    const herr = top.length ? `<h3>${I('laptop')}Herramientas más usadas por los docentes</h3><div class="rbars">${top.map(([k, v]) => `<div class="rbar"><span>${esc(herrLabel(k))}</span><span class="rbt"><i style="width:${Math.round(v * 100)}%"></i></span><b>${Math.round(v * 100)}%</b></div>`).join('')}</div>` : '';
+    const sub = hay ? `${I('users')}Basado en ${RES.n} respuestas válidas${resEstado === 'demo' ? ' · <b>vista de ejemplo</b>' : ' · se actualiza con cada respuesta'}`
+      : resEstado === 'error' ? `${I('info')}No se pudieron cargar los promedios del grupo; abajo ve solo sus resultados.`
+      : `${I('clock')}Los promedios del grupo aparecerán cuando haya al menos ${RES?.minimo || 10} respuestas válidas (van ${RES?.n ?? 0}). Vuelva a esta página más tarde.`;
+    return `${cab}<p class="res-sub">${sub}</p><div class="rleg" aria-hidden="true"><span><i class="mk tu"></i>Usted</span>${hay ? '<span><i class="mk pr"></i>Promedio del grupo</span>' : ''}<span class="esc">Escala de 1 a 5</span></div>${filas}${herr}
+<p class="rfoot">${I('shield-check')}Resultados anónimos y agregados: nadie puede ver respuestas individuales.</p>`;
   }
 
   function render(focus = true) {
@@ -261,7 +309,9 @@ ${m.oc ? `<div class="otra"><label for="otra" class="sr">Otra, especifique</labe
     const b = $('#next'); b.disabled = true; b.textContent = 'Enviando…';
     const r = buildRow(reason); let status;
     try { status = await post(r); } catch (e) { status = 'error'; store.set(PEND, [...store.get(PEND, []), r]); }
-    st.end = { reason, status }; st.i = END; st.A = {}; sending = false; save(); render(); // las respuestas ya enviadas no quedan en el dispositivo
+    // Solo se conservan tres promedios personales para compararlos con el grupo; las respuestas se borran del dispositivo.
+    const mio = reason ? null : { F: r.F_total / 5, D: (() => { const v = ['D1', 'D2', 'D3', 'D4', 'D5', 'D6'].map(id => +st.A[id]).filter(x => x > 0); return v.reduce((a, x) => a + x, 0) / v.length; })(), A: r.A_total / 6 };
+    st.end = { reason, status, mio }; st.i = END; st.A = {}; sending = false; save(); render(); cargarResumen();
   }
 
   /* ---------- eventos ---------- */
@@ -323,7 +373,7 @@ ${m.oc ? `<div class="otra"><label for="otra" class="sr">Otra, especifique</labe
     if (saved && saved.v === SCHEMA && saved.A) { st = { ...fresh(), ...saved }; if (CANAL_URL && !Object.keys(st.A).length) st.canal = CANAL_URL; }
     else if (d && d.v === SCHEMA && d.A) st = { ...fresh(), ...d };
     if (st.end) st.i = END; else { st.resume = st.i; st.i = 0; }
-    render(false); loadImages(); flush();
+    render(false); loadImages(); flush(); if (st.end && !st.end.reason) cargarResumen();
   }
   window.CUHDA_DEBUG = { buildRow, SCREENS, ITEMS, get state() { return st; } };
   window.claude?.hot?.ready ? window.claude.hot.ready(start) : start(window.claude?.hot?.data ?? {});

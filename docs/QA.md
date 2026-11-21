@@ -59,6 +59,22 @@ Se ejecutan con Playwright en dos dispositivos (Chrome de escritorio 1280 px y P
 | V1 | Validación del servidor | Acepta filas válidas; rechaza versión distinta, canal inválido, columnas desconocidas y valores fuera de rango |
 | V2 | Contrato encuesta ↔ servidor | Una respuesta real de la encuesta usa solo columnas del diccionario y pasa la validación |
 
+### Resultados al final, reporte y exportación
+
+| # | Caso | Resultado esperado |
+|---|---|---|
+| R1 | Resultados con ≥ 10 respuestas | Compara «Usted» con el promedio en las 3 dimensiones, calcula la diferencia y muestra las 5 herramientas más usadas; accesible |
+| R2 | Resultados con < 10 respuestas | No muestra promedios del grupo; indica cuántas respuestas faltan |
+| R3 | Resumen no disponible | Muestra solo los puntajes personales, sin errores |
+| R4 | Modo demostración | Vista de ejemplo marcada como tal |
+| R5 | Sin consentimiento | No se muestran resultados |
+| R6 | Resumen en Apps Script | Con < 10 no devuelve promedios; excluye piloto, control fallido y filas vacías; nunca incluye identificadores; D6 = 0 no cuenta |
+| R7 | Omega de McDonald | 0,79352 con cargas iguales de 0,7; 0,74945 y cargas exactas en un modelo congenérico |
+| R8 | Sintaxis SPSS | Etiquetas de variables y de valores, D6 = 0 como perdido, niveles de medida, termina en EXECUTE |
+| R9 | Reporte ejecutivo | 7 hojas, hallazgos automáticos, créditos; accesible; sin desplazamiento horizontal a 360 y 1280 px |
+| R10 | Reporte con hoja conectada | Sin clave pide entrar al dashboard; con clave usa los datos reales |
+| R11 | Enlace corto | Aparece en Compartir cuando se configura |
+
 ### Dashboard (`tests/dashboard.spec.js`)
 
 | # | Caso | Resultado esperado |
@@ -102,18 +118,24 @@ En Apps Script (servidor):
 
 ## 5. Resultados de la última ejecución
 
-Fecha: 20 de noviembre de 2026 · Playwright 1.49 · Chrome · axe-core 4.10
+Fecha: 21 de noviembre de 2026 · Playwright 1.49 · Chrome · axe-core 4.10
 
 | Proyecto | Pruebas | Aprobadas | Fallidas |
 |---|---|---|---|
-| Escritorio (1280 px) | 43 | 43 | 0 |
-| Móvil (Pixel 7) | 43 | 43 | 0 |
-| **Total** | **86** | **86** | **0** |
+| Escritorio (1280 px) | 60 | 60 | 0 |
+| Móvil (Pixel 7) | 60 | 60 | 0 |
+| **Total** | **120** | **120** | **0** |
 
 Verificación adicional: el código QR del afiche (con el logo al centro) se decodificó correctamente con OpenCV
 y abre el enlace con `utm_source=qr`.
 
 Hallazgos corregidos durante el ciclo de QA:
+- **Reporte (móvil):** las tablas anchas desbordaban la pantalla y la zona desplazable no era accesible por teclado;
+  ahora cada hoja con tablas anchas se desplaza dentro de sí misma y recibe foco.
+0. **Crítico (detectado en producción):** una prueba usaba la URL real de `config.js`, así que cada ejecución en GitHub Actions
+   enviaba respuestas falsas a la hoja. Ahora todas las pruebas parten en modo demostración, las conexiones a Google están
+   bloqueadas y cualquier intento hace fallar la prueba (`tests/base.js`). La suite se ejecutó con la URL real configurada
+   y no hubo ningún intento de conexión.
 1. **Función:** en la pantalla final, el botón de WhatsApp abría la encuesta en lugar de WhatsApp (detectado por la prueba S5).
 2. **Accesibilidad:** en el celular, los botones del dashboard y el botón Compartir quedaban solo con icono y sin nombre
    accesible; se añadió `aria-label`.

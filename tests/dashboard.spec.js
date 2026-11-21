@@ -1,5 +1,5 @@
 // Pruebas del dashboard y de las funciones estadísticas — CUHDA-FTI v2.2
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('./base');
 const AxeBuilder = require('@axe-core/playwright').default;
 const E = require('../js/estadistica.js');
 const banco = require('../js/preguntas.js');
@@ -21,6 +21,14 @@ test.describe('Estadística (valores verificados a mano)', () => {
     expect(p.r).toBeCloseTo(1, 6); expect(p.pendiente).toBeCloseTo(2, 6);
     const q = E.pearson([1, 2, 3, 4, 5, 6], [2, 1, 4, 3, 6, 5]);
     expect(q.r).toBeCloseTo(0.82857, 4); expect(q.lo).toBeLessThan(q.r); expect(q.hi).toBeGreaterThan(q.r);
+  });
+  test('omega de McDonald (verificado con modelos conocidos)', () => {
+    const R = [0, 1, 2, 3].map(i => [0, 1, 2, 3].map(j => (i === j ? 1 : 0.49)));
+    expect(E.omegaDesdeR(R).omega).toBeCloseTo(0.79352, 4); // cargas iguales de 0,7
+    const l = [0.8, 0.7, 0.6, 0.5], R2 = l.map((a, i) => l.map((b, j) => (i === j ? 1 : a * b)));
+    const o = E.omegaDesdeR(R2);
+    expect(o.omega).toBeCloseTo(0.74945, 4);
+    o.cargas.forEach((c, i) => expect(c).toBeCloseTo(l[i], 4));
   });
   test('medias, mediana, frecuencias y puntaje con «No aplica»', () => {
     expect(E.mean([1, 2, '', 3])).toBe(2);
@@ -78,6 +86,20 @@ test.describe('Dashboard', () => {
     await expect(page.locator('.sub')).toContainText('actualizado');
   });
 
+  test('ignora filas vacías de la hoja (contenido borrado sin eliminar la fila)', async ({ page }) => {
+    const filas = ejemplo.generar(banco, 12, 7), cols = Object.keys(filas.find(f => f.completo === 1));
+    const vacias = Array.from({ length: 5 }, () => cols.map(() => ''));
+    await sinFuentes(page);
+    await page.addInitScript(ep => { window.__CUHDA_ENDPOINT_TEST__ = ep; }, ENDPOINT);
+    await page.route(u => u.href.startsWith(ENDPOINT), r => r.fulfill({ status: 200, contentType: 'application/json',
+      body: JSON.stringify({ ok: true, columnas: cols, filas: [...filas.map(f => cols.map(c => f[c] ?? '')), ...vacias], generado: '2026-11-21T05:00:00Z' }) }));
+    await page.goto('/dashboard.html');
+    await page.fill('#clave', 'cualquiera');
+    await page.click('button[type=submit]');
+    await expect(page.locator('.kpi').first()).toContainText('12');
+    expect(await page.evaluate(() => window.CUHDA_DASH.RAW.length)).toBe(12);
+  });
+
   test('sin infracciones WCAG 2.1 AA (axe)', async ({ page }) => {
     await sinFuentes(page);
     await page.goto('/dashboard.html');
@@ -92,6 +114,63 @@ test.describe('Dashboard', () => {
       await sinFuentes(page);
       await page.goto('/dashboard.html');
       await expect(page.locator('.kpi').first()).toBeVisible();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(ancho);
+    });
+  }
+});
+
+test.describe('Exportación y reporte', () => {
+  test('el dashboard muestra omega y genera la sintaxis SPSS con etiquetas', async ({ page }) => {
+    await sinFuentes(page);
+    await page.goto('/dashboard.html');
+    await expect(page.locator('.alpha').first()).toContainText('ω =');
+    await expect(page.locator('#b-spss')).toBeVisible();
+    const sps = await page.evaluate(() => window.CUHDA_DASH.spss(Object.keys(window.CUHDA_DASH.analisis()[0])));
+    expect(sps).toContain('VARIABLE LABELS');
+    expect(sps).toContain("S1 1 '18 a 20 años' 2 '21 a 23 años'");
+    expect(sps).toContain("F1 1 'Nunca'");
+    expect(sps).toContain("D6 1 'Totalmente en desacuerdo'");
+    expect(sps).toContain('MISSING VALUES D6 (0).');
+    expect(sps).toMatch(/VARIABLE LEVEL .*A6 \(ORDINAL\)/s);
+    expect(sps.trim().endsWith('EXECUTE.')).toBe(true);
+  });
+
+  test('el reporte ejecutivo se genera con todas sus secciones y es accesible', async ({ page }) => {
+    await sinFuentes(page);
+    await page.goto('/reporte.html');
+    await expect(page.locator('.hoja')).toHaveCount(7);
+    await expect(page.locator('.portada')).toContainText('Jacqueline Noemy Monge Osorio');
+    expect(await page.locator('.hall li').count()).toBeGreaterThanOrEqual(5);
+    await expect(page.locator('#b-print')).toBeVisible();
+    const r = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze();
+    expect(r.violations.map(v => `${v.id} → ${v.nodes.slice(0, 3).map(n => n.target.join(' ')).join(', ')}`)).toEqual([]);
+  });
+
+  test('el reporte con la hoja conectada pide entrar primero al dashboard', async ({ page }) => {
+    await sinFuentes(page);
+    await page.addInitScript(ep => { window.__CUHDA_ENDPOINT_TEST__ = ep; }, ENDPOINT);
+    await page.goto('/reporte.html');
+    await expect(page.locator('.aviso')).toContainText('abra primero el dashboard');
+    await expect(page.locator('.aviso a[href="dashboard.html"]')).toBeVisible();
+  });
+
+  test('el reporte usa la clave de la sesión y los datos reales', async ({ page }) => {
+    const filas = ejemplo.generar(banco, 30, 5), cols = Object.keys(filas.find(f => f.completo === 1));
+    await sinFuentes(page);
+    await page.addInitScript(ep => { window.__CUHDA_ENDPOINT_TEST__ = ep; sessionStorage.setItem('cuhda-dashboard-clave', 'secreta123'); }, ENDPOINT);
+    await page.route(u => u.href.startsWith(ENDPOINT), r => r.fulfill({ status: 200, contentType: 'application/json',
+      body: JSON.stringify({ ok: true, columnas: cols, filas: filas.map(f => cols.map(c => f[c] ?? '')), generado: '2026-11-21T12:00:00Z' }) }));
+    await page.goto('/reporte.html');
+    await expect(page.locator('.ficha')).toContainText('Hoja de respuestas');
+    await expect(page.locator('.ejemplo')).toHaveCount(0);
+  });
+
+  for (const ancho of [360, 1280]) {
+    test(`el reporte no tiene desplazamiento horizontal a ${ancho}px`, async ({ page }) => {
+      await page.setViewportSize({ width: ancho, height: 900 });
+      await sinFuentes(page);
+      await page.goto('/reporte.html');
+      await expect(page.locator('.hoja').first()).toBeVisible();
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(ancho);
     });
   }

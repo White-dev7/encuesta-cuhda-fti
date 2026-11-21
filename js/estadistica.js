@@ -53,7 +53,48 @@
     return v.length ? v.reduce((s, a) => s + a, 0) / v.length : null;
   }
 
-  const api = { num, mean, variance, sd, median, quantile, ciMean, cronbach, alphaLabel, pearson, frecuencias, puntaje };
+  /** Matriz de correlaciones de Pearson entre columnas (casos completos). */
+  function correlaciones(filas) {
+    const ok = filas.filter(f => f.every(v => num(v) !== null)).map(f => f.map(Number));
+    const k = ok[0]?.length || 0, R = [];
+    for (let i = 0; i < k; i++) { R.push([]); for (let j = 0; j < k; j++) R[i].push(i === j ? 1 : (pearson(ok.map(f => f[i]), ok.map(f => f[j])).r ?? 0)); }
+    return { R, n: ok.length };
+  }
+
+  /**
+   * Omega de McDonald (ω total) para un factor, con cargas estimadas por factorización de ejes principales
+   * sobre la matriz de correlaciones: ω = (Σλ)² / ((Σλ)² + Σ(1 − λ²)).
+   */
+  function omegaDesdeR(R, iter = 200) {
+    const k = R.length; if (k < 2) return { omega: null, cargas: [] };
+    let h = R.map((fila, i) => Math.max(...fila.filter((_, j) => j !== i).map(Math.abs)));
+    let carg = new Array(k).fill(0);
+    for (let t = 0; t < iter; t++) {
+      const M = R.map((fila, i) => fila.map((v, j) => (i === j ? h[i] : v)));
+      let v = new Array(k).fill(1 / Math.sqrt(k)), val = 0;
+      for (let p = 0; p < 300; p++) {
+        const w = M.map(fila => fila.reduce((s, x, j) => s + x * v[j], 0));
+        const nrm = Math.sqrt(w.reduce((s, x) => s + x * x, 0)); if (!nrm) break;
+        const nv = w.map(x => x / nrm); val = nrm;
+        if (nv.every((x, i) => Math.abs(x - v[i]) < 1e-12)) { v = nv; break; } v = nv;
+      }
+      const nuevo = v.map(x => x * Math.sqrt(Math.max(val, 0)));
+      const sgn = nuevo.reduce((s, x) => s + x, 0) < 0 ? -1 : 1;
+      const nh = nuevo.map(x => Math.min(0.995, x * x));
+      const cambio = Math.max(...nh.map((x, i) => Math.abs(x - h[i])));
+      carg = nuevo.map(x => x * sgn); h = nh;
+      if (cambio < 1e-9) break;
+    }
+    const s = carg.reduce((a, b) => a + b, 0), u = carg.reduce((a, l) => a + (1 - l * l), 0);
+    return { omega: s * s / (s * s + u), cargas: carg };
+  }
+  function omega(filas) {
+    const { R, n } = correlaciones(filas);
+    if (n < 5 || R.length < 2) return { omega: null, n, cargas: [] };
+    return { ...omegaDesdeR(R), n };
+  }
+
+  const api = { num, mean, variance, sd, median, quantile, ciMean, cronbach, alphaLabel, pearson, frecuencias, puntaje, correlaciones, omegaDesdeR, omega };
   if (typeof window !== 'undefined') window.CUHDA_ESTADISTICA = api;
   if (typeof module !== 'undefined') module.exports = api;
 })();

@@ -22,6 +22,10 @@ window.CUHDA_CONFIG = {
   urlPublica: 'https://white-dev7.github.io/encuesta-cuhda-fti/',
   campana: 'cuhda-fti', // nombre de campaña en los enlaces (utm_campaign)
 
+  // Enlace corto opcional, fácil de dictar en clase (por ejemplo 'bit.ly/encuesta-fti').
+  // Créelo gratis en bitly.com apuntando a la dirección de urlPublica con ?utm_source=corto.
+  urlCorta: '',
+
   // Respuestas completadas en menos segundos se marcan con flag_rapido = 1.
   minSegundos: 120,
 

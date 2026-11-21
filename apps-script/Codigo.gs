@@ -8,6 +8,9 @@
  * 4. Copie la URL /exec en js/config.js (campo endpoint).
  * 5. Para el dashboard: ejecute verClaveDashboard y copie la clave que aparece en el registro.
  *
+ * Lectura pública (sin clave): ?accion=resumen devuelve solo promedios y porcentajes agregados,
+ * y únicamente cuando hay al menos 10 respuestas válidas.
+ *
  * Control de calidad en el servidor:
  *  · valida versión, nombres de campo, tipos y rangos antes de guardar;
  *  · descarta duplicados por id_respuesta;
@@ -202,8 +205,47 @@ function rechazar(motivo, contenido) {
  * Lectura para el dashboard: GET .../exec?accion=datos&clave=SU_CLAVE
  * Sin la clave correcta no devuelve datos.
  */
+const MIN_RESUMEN = 10; // los promedios públicos se muestran solo con al menos 10 respuestas válidas
+
+/**
+ * Resumen público para la pantalla final de la encuesta: SOLO agregados (promedios y porcentajes),
+ * nunca respuestas individuales. Con menos de MIN_RESUMEN respuestas válidas no devuelve promedios.
+ */
+function resumir(columnas, filas) {
+  const filasObj = filas.map(f => { const o = {}; columnas.forEach((c, i) => { o[c] = f[i]; }); return o; });
+  const val = filasObj.filter(r => String(r.id_respuesta || '').trim() !== '' && Number(r.completo) === 1
+    && Number(r.CTRL1_valido) === 1 && Number(r.piloto) !== 1);
+  const n = val.length;
+  if (n < MIN_RESUMEN) return { ok: true, n: n, suficiente: false, minimo: MIN_RESUMEN };
+  const media = (r, ids, ceroPerdido) => {
+    const v = ids.map(id => (r[id] === '' || r[id] === null || r[id] === undefined ? NaN : Number(r[id])))
+      .filter(x => !isNaN(x) && !(ceroPerdido && x === 0));
+    return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
+  };
+  const prom = arr => { const v = arr.filter(x => x !== null); return v.length ? Math.round(v.reduce((a, b) => a + b, 0) / v.length * 100) / 100 : null; };
+  const ids = { F: ['F1', 'F2', 'F3', 'F4', 'F5'], D: ['D1', 'D2', 'D3', 'D4', 'D5', 'D6'], A: ['A1', 'A2', 'A3', 'A4', 'A5', 'A6'] };
+  const dim = {};
+  Object.keys(ids).forEach(k => { dim[k] = prom(val.map(r => media(r, ids[k], k === 'D'))); });
+  const herr = {};
+  columnas.filter(c => /^H[1-6]_\d+$/.test(c)).forEach(c => {
+    herr[c] = Math.round(val.filter(r => Number(r[c]) === 1).length / n * 1000) / 1000;
+  });
+  return { ok: true, n: n, suficiente: true, minimo: MIN_RESUMEN, dim: dim, herr: herr, actualizado: new Date().toISOString() };
+}
+
 function doGet(e) {
   const p = (e && e.parameter) || {};
+  if (p.accion === 'resumen') {
+    const cache = CacheService.getScriptCache();
+    const guardado = cache.get('resumen');
+    if (guardado) return ContentService.createTextOutput(guardado).setMimeType(ContentService.MimeType.JSON);
+    const hoja = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(HOJA);
+    let res = { ok: true, n: 0, suficiente: false, minimo: MIN_RESUMEN };
+    if (hoja && hoja.getLastRow() > 1) { const v = hoja.getDataRange().getValues(); const cols = v.shift(); res = resumir(cols, v); }
+    const txt = JSON.stringify(res);
+    cache.put('resumen', txt, 60); // se recalcula como máximo una vez por minuto
+    return ContentService.createTextOutput(txt).setMimeType(ContentService.MimeType.JSON);
+  }
   if (p.accion !== 'datos') return salida({ ok: true, mensaje: 'Receptor ' + VERSION + ' activo.' });
   const clave = PropertiesService.getScriptProperties().getProperty('CLAVE_DASHBOARD');
   if (!clave || p.clave !== clave) { Utilities.sleep(800); return salida({ ok: false, error: 'clave' }); }
@@ -211,7 +253,10 @@ function doGet(e) {
   if (!hoja || hoja.getLastRow() < 2) return salida({ ok: true, columnas: COLUMNAS, filas: [] });
   const valores = hoja.getDataRange().getValues();
   const columnas = valores.shift();
-  const filas = valores.map(f => f.map(v => (v instanceof Date ? v.toISOString() : v)));
+  const colId = columnas.indexOf('id_respuesta');
+  const filas = valores
+    .filter(f => colId < 0 || String(f[colId]).trim() !== '') // omite filas vaciadas a mano
+    .map(f => f.map(v => (v instanceof Date ? v.toISOString() : v)));
   return salida({ ok: true, columnas: columnas, filas: filas, generado: new Date().toISOString() });
 }
 
