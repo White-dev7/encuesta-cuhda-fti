@@ -4,7 +4,7 @@
 window.CUHDA_CONFIG = {
   // URL de la aplicación web de Apps Script (termina en /exec).
   // Vacía = modo demostración: la encuesta funciona pero no envía nada.
-  endpoint: '',
+  endpoint: 'https://script.google.com/macros/s/AKfycbxm4L5SVVVF2GMH-IBHPITWkUH9Q5BLMA6Xk56V2s3MgC7AyLeKl236ZpM-PVgCbJR5/exec',
 
   version: 'CUHDA-FTI v2.2',
   ciclo: '2025–2026',
